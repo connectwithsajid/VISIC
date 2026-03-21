@@ -1,0 +1,142 @@
+Looking for CF file at: /Users/sajid_workspace/VISIC/Backend-Data-Code/cf_list.txt
+Processing CF: 21-0043
+Finished CF: 21-0043
+Processing CF: 21-0043
+Traceback (most recent call last):
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 2125, in _exec_insertmany_context
+    dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~^
+        cursor,
+        ^^^^^^^
+    ...<2 lines>...
+        context,
+        ^^^^^^^^
+    )
+    ^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+psycopg2.errors.UniqueViolation: duplicate key value violates unique constraint "uq_attachment_per_file"
+DETAIL:  Key (council_file_id, url)=(1, https://cityclerk.lacity.org/onlinedocs/2021/21-0043_rpt_ATTY_05-25-21.pdf) already exists.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/main.py", line 5, in <module>
+    main()
+    ~~~~^^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/data_processing/data_scraper.py", line 184, in main
+    save_council_file(cf_number, data)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/data_processing/data_writer.py", line 59, in save_council_file
+    session.commit()
+    ~~~~~~~~~~~~~~^^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/orm/session.py", line 2030, in commit
+    trans.commit(_to_root=True)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "<string>", line 2, in commit
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/orm/state_changes.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/orm/session.py", line 1311, in commit
+    self._prepare_impl()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "<string>", line 2, in _prepare_impl
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/orm/state_changes.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/orm/session.py", line 1286, in _prepare_impl
+    self.session.flush()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/orm/session.py", line 4331, in flush
+    self._flush(objects)
+    ~~~~~~~~~~~^^^^^^^^^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/orm/session.py", line 4466, in _flush
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/util/langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/orm/session.py", line 4427, in _flush
+    flush_context.execute()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/orm/unitofwork.py", line 466, in execute
+    rec.execute(self)
+    ~~~~~~~~~~~^^^^^^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/orm/unitofwork.py", line 642, in execute
+    util.preloaded.orm_persistence.save_obj(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.mapper,
+        ^^^^^^^^^^^^
+        uow.states_for_mapper_hierarchy(self.mapper, False, False),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        uow,
+        ^^^^
+    )
+    ^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/orm/persistence.py", line 93, in save_obj
+    _emit_insert_statements(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        base_mapper,
+        ^^^^^^^^^^^^
+    ...<3 lines>...
+        insert,
+        ^^^^^^^
+    )
+    ^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/orm/persistence.py", line 1143, in _emit_insert_statements
+    result = connection.execute(
+        statement, multiparams, execution_options=execution_options
+    )
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/sql/elements.py", line 527, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, execution_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
+    ret = self._execute_context(
+        dialect,
+    ...<8 lines>...
+        cache_hit=cache_hit,
+    )
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 1844, in _execute_context
+    return self._exec_insertmany_context(dialect, context)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 2133, in _exec_insertmany_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e,
+        ^^
+    ...<4 lines>...
+        is_sub_exec=True,
+        ^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 2125, in _exec_insertmany_context
+    dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~^
+        cursor,
+        ^^^^^^^
+    ...<2 lines>...
+        context,
+        ^^^^^^^^
+    )
+    ^
+  File "/Users/sajid_workspace/VISIC/Backend-Data-Code/venv/lib/python3.13/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+sqlalchemy.exc.IntegrityError: (psycopg2.errors.UniqueViolation) duplicate key value violates unique constraint "uq_attachment_per_file"
+DETAIL:  Key (council_file_id, url)=(1, https://cityclerk.lacity.org/onlinedocs/2021/21-0043_rpt_ATTY_05-25-21.pdf) already exists.
+
+[SQL: INSERT INTO attachments (council_file_id, text, url) SELECT p0::INTEGER, p1::TEXT, p2::TEXT FROM (VALUES (%(council_file_id__0)s, %(text__0)s, %(url__0)s, 0), (%(council_file_id__1)s, %(text__1)s, %(url__1)s, 1)) AS imp_sen(p0, p1, p2, sen_counter) ORDER BY sen_counter RETURNING attachments.id, attachments.id AS id__1]
+[parameters: {'council_file_id__0': 1, 'url__0': 'https://cityclerk.lacity.org/onlinedocs/2021/21-0043_rpt_ATTY_05-25-21.pdf', 'text__0': 'Report from City Attorney', 'council_file_id__1': 1, 'url__1': 'https://cityclerk.lacity.org/onlinedocs/2021/21-0043_mot_01-12-2021.pdf', 'text__1': 'Motion'}]
+(Background on this error at: https://sqlalche.me/e/20/gkpj)
+(venv) sajid_workspace@Sajids-MacBook-Pro Backend-Data-Code % 

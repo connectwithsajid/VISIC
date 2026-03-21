@@ -1,0 +1,4 @@
+pip install sqlalchemy psycopg2-binary
+python -m pip install sqlalchemy psycopg2-binary
+pip install requests beautifulsoup4
+python3 -m pip install requests beautifulsoup4
