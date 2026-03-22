@@ -2,3 +2,15 @@ pip install sqlalchemy psycopg2-binary
 python -m pip install sqlalchemy psycopg2-binary
 pip install requests beautifulsoup4
 python3 -m pip install requests beautifulsoup4
+
+
+
+How to run:
+brew services start postgresql@14  
+source venv/bin/activate     
+./venv/bin/python3 -m DB_connections.drop_tables
+./venv/bin/python3 -m DB_connections.create_tables
+
+./venv/bin/python3 main.py    
+
+brew services stop postgresql@14  

@@ -1,11 +1,26 @@
-# db_writer.py
-from DB_connections.db_connection import SessionLocal
-from DB_connections.db_schema import CouncilFile, FileActivity, Attachment
-from sqlalchemy.exc import IntegrityError
+# data_processing/data_writer.py
+
+from datetime import date
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from dateutil import parser as dateparser
 
+from DB_connections.db_connection import SessionLocal
+from DB_connections.db_schema import (
+    CouncilMember,
+    Project,
+    ProjectMover,
+    Vote,
+    FileActivity,
+    FileActivityURL,
+    OnlineDocument,
+    GraphType,
+    ProjectGraph,
+)
 
-# Only updated 
+ALLOWED_PROJECT_STATUS = {"planned", "in-progress", "completed"}
+ALLOWED_MOVE_ROLES = {"primary", "secondary", "other"}
+
 
 def normalize(value):
     if value is None:
@@ -13,202 +28,380 @@ def normalize(value):
     return " ".join(str(value).split()).strip()
 
 
-def save_council_file(cf_number: str, data: dict):
+def parse_date_safe(value):
+    if value is None or value == "":
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return dateparser.parse(str(value)).date()
+    except Exception:
+        return None
+
+
+def make_key(value):
+    return normalize(value).lower()
+
+
+def get_or_create_council_member(session, member_data):
+    name = normalize(
+        member_data.get("name")
+        or member_data.get("council_member_name")
+        or member_data.get("member_name")
+    )
+    district_raw = member_data.get("district") or member_data.get("cd") or 0
+    try:
+        district = int(district_raw)
+    except Exception:
+        district = 0
+
+    member = session.execute(
+        select(CouncilMember).where(
+            CouncilMember.name == name,
+            CouncilMember.district == district,
+        )
+    ).scalar_one_or_none()
+
+    if member is None:
+        member = CouncilMember(
+            name=name or "Unknown",
+            district=district,
+            impact_summary=normalize(member_data.get("impact_summary")),
+            website=normalize(member_data.get("website")),
+            phone_number=normalize(member_data.get("phone_number")),
+            about=normalize(member_data.get("about")),
+            profile_pic=normalize(member_data.get("profile_pic")),
+        )
+        session.add(member)
+        session.flush()
+
+    return member
+
+
+def get_or_create_graph_type(session, graph_data):
+    label = normalize(graph_data.get("label"))
+    graph_type = session.execute(
+        select(GraphType).where(GraphType.label == label)
+    ).scalar_one_or_none()
+
+    if graph_type is None:
+        graph_type = GraphType(
+            label=label,
+            description=normalize(graph_data.get("description")),
+        )
+        session.add(graph_type)
+        session.flush()
+
+    return graph_type
+
+
+def dedupe_activities_keep_first(incoming_activities):
+    seen = set()
+    deduped = []
+
+    for act in incoming_activities or []:
+        activity_date = normalize(act.get("date"))
+        activity_text = normalize(act.get("activity") or act.get("activity_text"))
+        key = (activity_date, activity_text)
+
+        if key in seen:
+            print("Skipped duplicate in JSON:", key)
+            continue
+
+        seen.add(key)
+        deduped.append({
+            "date": activity_date,
+            "activity": activity_text,
+            "doc_url": normalize(act.get("doc_url")),
+            "doc_title": normalize(act.get("doc_title")),
+            "doc_date": normalize(act.get("doc_date")),
+            "icon_src": normalize(act.get("icon_src")),
+            "showtip_id": normalize(act.get("showtip_id")),
+        })
+
+    return deduped
+
+
+def dedupe_documents_keep_first(incoming_documents):
+    seen = set()
+    deduped = []
+
+    for doc in incoming_documents or []:
+        url = normalize(doc.get("url"))
+        title = normalize(doc.get("title") or doc.get("text"))
+        doc_date = normalize(doc.get("date"))
+
+        if not url:
+            continue
+
+        if url in seen:
+            print("Skipped duplicate document in JSON:", url)
+            continue
+
+        seen.add(url)
+        deduped.append({
+            "url": url,
+            "title": title,
+            "date": doc_date,
+        })
+
+    return deduped
+
+
+def save_project_record(project_id: str, data: dict):
     session = SessionLocal()
 
     try:
-        # -------------------------
-        # Find or create CouncilFile
-        # -------------------------
-        stmt = select(CouncilFile).where(CouncilFile.cf_number == cf_number)
-        cf = session.execute(stmt).scalars().first()
+        project_id = normalize(
+            project_id
+            or data.get("project_id")
+            or data.get("id")
+            or data.get("cf_number")
+        )
 
-        if not cf:
-            cf = CouncilFile(cf_number=cf_number)
-            session.add(cf)
+        if not project_id:
+            raise ValueError("project_id is required")
+
+        # -------------------------
+        # Find or create Project
+        # -------------------------
+        project = session.execute(
+            select(Project).where(Project.id == project_id)
+        ).scalar_one_or_none()
+
+        if project is None:
+            project = Project(
+                id=project_id,
+
+                name=normalize(data.get("name") or data.get("title") or project_id),
+                status="planned",
+                about=normalize(data.get("about")),
+                start_date=parse_date_safe(data.get("start_date")),
+                end_date=parse_date_safe(data.get("end_date")),
+                meeting_date=None,
+                meeting_type="",
+                vote_action="",
+                vote_given="",
+            )
+            session.add(project)
             session.flush()
 
-        # Update scalar fields
-        for field in [
-            "title", "start_date", "last_changed_date", "end_date",
-            "reference_numbers", "council_district", "council_member_mover", 
-            "second_council_member", "mover_seconder_comment"
-        ]:
-            if field in data:
-                setattr(cf, field, data.get(field))
+        # Update project fields
+        project.name = normalize(data.get("name") or data.get("title") or project.name)
+        project.about = normalize(data.get("about"))
+
+        if data.get("status"):
+            status = normalize(data.get("status")).lower()
+            if status in ALLOWED_PROJECT_STATUS:
+                project.status = status
+
+        if data.get("start_date"):
+            project.start_date = parse_date_safe(data.get("start_date"))
+
+        if data.get("end_date"):
+            project.end_date = parse_date_safe(data.get("end_date"))
+
+        # -------------------------
+        # Vote info
+        # -------------------------
+        vote_info = data.get("vote_info", {}) or {}
+        if vote_info:
+            project.meeting_date = parse_date_safe(vote_info.get("Meeting Date"))
+            project.meeting_type = normalize(vote_info.get("Meeting Type"))
+            project.vote_action = normalize(vote_info.get("Vote Action"))
+            project.vote_given = normalize(vote_info.get("Vote Given"))
+
         # ===============================
-        # HANDLE ACTIVITIES
+        # FILE ACTIVITIES
         # ===============================
+        incoming_activities = dedupe_activities_keep_first(data.get("file_activities", []))
 
-        incoming_raw = data.get("file_activities", [])
-
-        # Step 1: Deduplicate incoming JSON
-        seen_incoming = set()
-        deduped_activities = []
-
-        for act in incoming_raw:
-            date = normalize(act.get("date"))
-            text = normalize(act.get("activity") or act.get("activity_text"))
-
-            key = (date, text)
-
-            if key in seen_incoming:
-                print("Skipped duplicate in JSON:", key)
-                continue
-
-            seen_incoming.add(key)
-            deduped_activities.append({
-                "date": date,
-                "text": text,
-                "extra": normalize(act.get("extra"))
-            })
-
-        # Step 2: Load existing DB records
-        existing_rows = session.execute(
-            select(FileActivity.activity_date, FileActivity.activity_text)
-            .where(FileActivity.council_file_id == cf.id)
-        ).all()
-
-        existing_keys = {
+        existing_activity_keys = {
             (normalize(row.activity_date), normalize(row.activity_text))
-            for row in existing_rows
-        }
-
-        # Step 3: Insert only new records
-        for act in deduped_activities:
-            key = (act["date"], act["text"])
-
-            if key in existing_keys:
-                print("Skipped existing DB record:", key)
-                continue
-
-            new_activity = FileActivity(
-                council_file_id=cf.id,
-                activity_date=act["date"],
-                activity_text=act["text"],
-                extra=act["extra"]
-            )
-
-            session.add(new_activity)
-
-        # ===============================
-        # HANDLE ATTACHMENTS
-        # ===============================
-
-        incoming_attachments = data.get("attachments", [])
-
-        seen_urls = set()
-        deduped_attachments = []
-
-        for att in incoming_attachments:
-            url = normalize(att.get("url"))
-            text = normalize(att.get("text"))
-
-            if not url:
-                continue
-
-            if url in seen_urls:
-                print("Skipped duplicate attachment in JSON:", url)
-                continue
-
-            seen_urls.add(url)
-            deduped_attachments.append({
-                "url": url,
-                "text": text
-            })
-
-        existing_urls = {
-            row[0]
             for row in session.execute(
-                select(Attachment.url)
-                .where(Attachment.council_file_id == cf.id)
+                select(FileActivity.activity_date, FileActivity.activity_text)
+                .where(FileActivity.project_id == project.id)
             ).all()
         }
 
-        for att in deduped_attachments:
-            if att["url"] in existing_urls:
-                print("Skipped existing DB attachment:", att["url"])
+        existing_activity_urls = {
+            normalize(row[0])
+            for row in session.execute(
+                select(FileActivityURL.url).where(FileActivityURL.project_id == project.id)
+            ).all()
+        }
+
+        for act in incoming_activities:
+            key = (normalize(act["date"]), normalize(act["activity"]))
+
+            if key in existing_activity_keys:
+                print("Skipped existing DB record:", key)
                 continue
 
+            activity = FileActivity(
+                project_id=project.id,
+                activity_date=parse_date_safe(act["date"]),
+                activity_text=act["activity"],
+            )
+            session.add(activity)
+            session.flush()
+
+            if act.get("doc_url"):
+                doc_url = normalize(act["doc_url"])
+                if doc_url and doc_url not in existing_activity_urls:
+                    session.add(
+                        FileActivityURL(
+                            project_id=project.id,
+                            url=doc_url,
+                            file_activity_id=activity.id,
+                        )
+                    )
+                    existing_activity_urls.add(doc_url)
+
+        # ===============================
+        # ONLINE DOCUMENTS
+        # ===============================
+        incoming_documents = data.get("attachments") or data.get("online_documents") or []
+        deduped_documents = dedupe_documents_keep_first(incoming_documents)
+
+        for doc in deduped_documents:
+            url = normalize(doc["url"])
+
+            existing_doc = session.execute(
+                select(OnlineDocument).where(
+                    OnlineDocument.project_id == project.id,
+                    OnlineDocument.url == url
+                )
+            ).scalar_one_or_none()
+
+            if existing_doc:
+                print("Updating existing document:", url)
+                existing_doc.title = normalize(doc["title"])
+                existing_doc.date = parse_date_safe(doc["date"]) or project.start_date or date.today()
+                continue
+
+            print("Inserting new document:", url)
             session.add(
-                Attachment(
-                    council_file_id=cf.id,
-                    text=att["text"],
-                    url=att["url"]
+                OnlineDocument(
+                    project_id=project.id,
+                    url=url,
+                    title=normalize(doc["title"] or url),
+                    date=parse_date_safe(doc["date"]) or project.start_date or date.today(),
                 )
             )
 
-        session.commit()
-        return cf.id
+        # ===============================
+        # PROJECT MOVERS
+        # ===============================
+        incoming_movers = data.get("project_movers", []) or []
 
-    except IntegrityError:
-        session.rollback()
-        raise
+        existing_mover_keys = {
+            (normalize(row.project_id), normalize(row.council_member_id), normalize(row.role))
+            for row in session.execute(
+                select(ProjectMover.project_id, ProjectMover.council_member_id, ProjectMover.role)
+                .where(ProjectMover.project_id == project.id)
+            ).all()
+        }
 
-    finally:
-        session.close()
+        for mover in incoming_movers:
+            role = normalize(mover.get("role") or "other").lower()
+            if role not in ALLOWED_MOVE_ROLES:
+                role = "other"
 
-# All or Nothing 
-# def save_council_file(cf_number: str, data: dict):
-    """
-    Insert or update a CouncilFile and its related activities & attachments.
-    `data` is expected to include:
-      - title, date_received_introduced, last_changed_date, expiration_date,
-      - reference_numbers, council_district, mover, second, mover_seconder_comment,
-      - file_activities: list of {"date","activity","extra"}
-      - attachments: list of {"text","url"}
-    """
-    session = SessionLocal()
-    try:
-        # Try to find existing record
-        stmt = select(CouncilFile).where(CouncilFile.cf_number == cf_number)
-        existing = session.execute(stmt).scalar_one_or_none()
+            member = get_or_create_council_member(session, mover)
 
-        if existing is None:
-            cf = CouncilFile(cf_number=cf_number)
-            session.add(cf)
-            # flush to get cf.id for child relationships
-            session.flush()  
-        else:
-            cf = existing
+            mover_key = (project.id, member.id, role)
+            if mover_key in existing_mover_keys:
+                print("Skipped existing DB mover:", mover_key)
+                continue
 
-        # Update scalar fields
-        for field in [
-            "title", "start_date", "last_changed_date", "end_date",
-            "reference_numbers", "council_district", "council_member_mover", 
-            "second_council_member", "mover_seconder_comment"
-        ]:
-            if field in data:
-                setattr(cf, field, data.get(field))
-
-        # Replace activities: simple approach -> delete existing and insert new
-        # Alternatively you could diff and upsert
-        if "file_activities" in data:
-            # clear existing
-            cf.activities[:] = []
-            for act in data.get("file_activities", []):
-                fa = FileActivity(
-                    activity_date=act.get("date"),
-                    activity_text=act.get("activity"),
-                    extra=act.get("extra")
+            session.add(
+                ProjectMover(
+                    project_id=project.id,
+                    council_member_id=member.id,
+                    role=role,
                 )
-                cf.activities.append(fa)
+            )
+            existing_mover_keys.add(mover_key)
 
-        if "attachments" in data:
-            cf.attachments[:] = []
-            for att in data.get("attachments", []):
-                a = Attachment(text=att.get("text"), url=att.get("url"))
-                cf.attachments.append(a)
+        # ===============================
+        # VOTES
+        # ===============================
+        incoming_votes = data.get("vote_members", []) or []
 
-        session.add(cf)
+        existing_vote_keys = {
+            (normalize(row.council_member_id), normalize(row.project_id))
+            for row in session.execute(
+                select(Vote.council_member_id, Vote.project_id)
+                .where(Vote.project_id == project.id)
+            ).all()
+        }
+
+        for vote_item in incoming_votes:
+            member = get_or_create_council_member(session, vote_item)
+
+            vote_key = (member.id, project.id)
+            if vote_key in existing_vote_keys:
+                print("Skipped existing DB vote:", vote_key)
+                continue
+
+            session.add(
+                Vote(
+                    council_member_id=member.id,
+                    project_id=project.id,
+                    vote=normalize(vote_item.get("vote")),
+                )
+            )
+            existing_vote_keys.add(vote_key)
+
+        # ===============================
+        # GRAPH TYPES / PROJECT GRAPHS
+        # ===============================
+        incoming_graph_types = data.get("graph_types", []) or []
+
+        existing_project_graph_keys = {
+            (normalize(row.project_id), normalize(row.graph_id))
+            for row in session.execute(
+                select(ProjectGraph.project_id, ProjectGraph.graph_id)
+                .where(ProjectGraph.project_id == project.id)
+            ).all()
+        }
+
+        for graph_data in incoming_graph_types:
+            graph_type = get_or_create_graph_type(session, graph_data)
+
+            graph_key = (project.id, graph_type.id)
+            if graph_key in existing_project_graph_keys:
+                print("Skipped existing DB graph relation:", graph_key)
+                continue
+
+            session.add(
+                ProjectGraph(
+                    project_id=project.id,
+                    graph_id=graph_type.id,
+                )
+            )
+            existing_project_graph_keys.add(graph_key)
+
         session.commit()
-        session.refresh(cf)
-        return cf.id
+
+        return {
+            "project_id": project.id,
+            "status": "ok",
+        }
+
     except IntegrityError as e:
         session.rollback()
+        print("IntegrityError:", e)
         raise
+
     except Exception:
         session.rollback()
         raise
+
     finally:
         session.close()
+
+
+def save_council_file(cf_number: str, data: dict):
+    return save_project_record(cf_number, data)
