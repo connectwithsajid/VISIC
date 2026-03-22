@@ -49,7 +49,7 @@ def get_or_create_council_member(session, member_data):
         or member_data.get("council_member_name")
         or member_data.get("member_name")
     )
-    district_raw = member_data.get("district") or member_data.get("cd") or 0
+    district_raw =  member_data.get("cd") or 0 #member_data.get("district") or
     try:
         district = int(district_raw)
     except Exception:
@@ -58,7 +58,7 @@ def get_or_create_council_member(session, member_data):
     member = session.execute(
         select(CouncilMember).where(
             CouncilMember.name == name,
-            CouncilMember.district == district,
+            # CouncilMember.district == district,
         )
     ).scalar_one_or_none()
 
@@ -172,7 +172,6 @@ def save_project_record(project_id: str, data: dict):
         if project is None:
             project = Project(
                 id=project_id,
-
                 name=normalize(data.get("name") or data.get("title") or project_id),
                 status="planned",
                 about=normalize(data.get("about")),
@@ -290,6 +289,37 @@ def save_project_record(project_id: str, data: dict):
                 )
             )
 
+        
+        # ===============================
+        # VOTES
+        # ===============================
+        incoming_votes = data.get("vote_members", []) or []
+
+        existing_vote_keys = {
+            (normalize(row.council_member_id), normalize(row.project_id))
+            for row in session.execute(
+                select(Vote.council_member_id, Vote.project_id)
+                .where(Vote.project_id == project.id)
+            ).all()
+        }
+
+        for vote_item in incoming_votes:
+            member = get_or_create_council_member(session, vote_item)
+
+            vote_key = (member.id, project.id)
+            if vote_key in existing_vote_keys:
+                print("Skipped existing DB vote:", vote_key)
+                continue
+
+            session.add(
+                Vote(
+                    council_member_id=member.id,
+                    project_id=project.id,
+                    vote=normalize(vote_item.get("vote")),
+                )
+            )
+            existing_vote_keys.add(vote_key)
+
         # ===============================
         # PROJECT MOVERS
         # ===============================
@@ -323,36 +353,6 @@ def save_project_record(project_id: str, data: dict):
                 )
             )
             existing_mover_keys.add(mover_key)
-
-        # ===============================
-        # VOTES
-        # ===============================
-        incoming_votes = data.get("vote_members", []) or []
-
-        existing_vote_keys = {
-            (normalize(row.council_member_id), normalize(row.project_id))
-            for row in session.execute(
-                select(Vote.council_member_id, Vote.project_id)
-                .where(Vote.project_id == project.id)
-            ).all()
-        }
-
-        for vote_item in incoming_votes:
-            member = get_or_create_council_member(session, vote_item)
-
-            vote_key = (member.id, project.id)
-            if vote_key in existing_vote_keys:
-                print("Skipped existing DB vote:", vote_key)
-                continue
-
-            session.add(
-                Vote(
-                    council_member_id=member.id,
-                    project_id=project.id,
-                    vote=normalize(vote_item.get("vote")),
-                )
-            )
-            existing_vote_keys.add(vote_key)
 
         # ===============================
         # GRAPH TYPES / PROJECT GRAPHS

@@ -281,7 +281,7 @@ def parse_project_movers(soup):
                 if name:
                     movers.append({
                         "name": name,
-                        "district": None,
+                        # "district": None,
                         "role": "secondary",
                     })
 
