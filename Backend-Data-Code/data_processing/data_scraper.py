@@ -2,6 +2,7 @@ import os
 import re
 import time
 from urllib.parse import urljoin
+import unicodedata
 
 import requests
 from bs4 import BeautifulSoup
@@ -20,6 +21,31 @@ def normalize(value):
     if value is None:
         return ""
     return " ".join(str(value).split()).strip()
+
+def normalize_name(name: str) -> str:
+    if not name:
+        return ""
+
+    # Normalize unicode (é → e)
+    name = unicodedata.normalize("NFKD", name)
+    name = "".join(c for c in name if not unicodedata.combining(c))
+
+    # Standard cleanup
+    name = name.strip()
+
+    return name
+
+
+def split_name(full_name: str):
+    full_name = normalize_name(full_name)
+    parts = full_name.split()
+
+    if len(parts) == 0:
+        return None, None
+    elif len(parts) == 1:
+        return parts[0], ""
+    else:
+        return parts[0], " ".join(parts[1:])
 
 
 def get_soup(url):
@@ -233,14 +259,16 @@ def parse_vote_members(soup):
         tds = tr.find_all("td")
         if len(tds) < 3:
             continue
+        
+        full_name = normalize(tds[0].get_text(" ", strip=True))
+        first, last = split_name(full_name)
+        members.append({
+            "first_name": first,
+            "last_name": last,
+            "cd": normalize(tds[1].get_text(" ", strip=True)),
+            "vote": normalize(tds[2].get_text(" ", strip=True)),
+        })
 
-        members.append(
-            {
-                "member_name": normalize(tds[0].get_text(" ", strip=True)),
-                "cd": normalize(tds[1].get_text(" ", strip=True)),
-                "vote": normalize(tds[2].get_text(" ", strip=True)),
-            }
-        )
 
     return members
 
@@ -257,13 +285,17 @@ def parse_project_movers(soup):
 
     if mover_value:
         mover_container = mover_value.find_next_sibling("div", class_="rectext")
+
+        
         if mover_container:
             for div in mover_container.find_all("div"):
                 name = normalize(div.get_text(" ", strip=True))
                 if name:
+                    first, last = split_name(name)
                     movers.append({
-                        "name": name,
-                        "district": None,
+                        "first_name": first,
+                        "last_name": last,      
+                        # "district": None,
                         "role": "primary",
                     })
 
@@ -279,8 +311,10 @@ def parse_project_movers(soup):
             for div in second_container.find_all("div"):
                 name = normalize(div.get_text(" ", strip=True))
                 if name:
+                    first, last = split_name(name)
                     movers.append({
-                        "name": name,
+                        "first_name": first,
+                        "last_name": last,
                         # "district": None,
                         "role": "secondary",
                     })

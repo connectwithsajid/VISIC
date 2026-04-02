@@ -1,6 +1,8 @@
 # data_processing/data_writer.py
 
 from datetime import date
+import re
+import json
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from dateutil import parser as dateparser
@@ -9,6 +11,7 @@ from DB_connections.db_connection import SessionLocal
 from DB_connections.db_schema import (
     CouncilMember,
     Project,
+    ProjectAddress,
     ProjectMover,
     Vote,
     FileActivity,
@@ -22,6 +25,112 @@ ALLOWED_PROJECT_STATUS = {"planned", "in-progress", "completed"}
 ALLOWED_MOVE_ROLES = {"primary", "secondary", "other"}
 
 
+# -----------------
+STREET_SUFFIXES = (
+    "Street", "St", "Avenue", "Ave", "Boulevard", "Blvd", "Road", "Rd",
+    "Drive", "Dr", "Place", "Pl", "Way", "Court", "Ct", "Lane", "Ln",
+    "Highway", "Hwy", "Park", "Square", "Sq", "Terrace", "Ter", "Circle", "Cir"
+)
+
+DIRECTIONS = r"(?:N|North|S|South|E|East|W|West|NE|NW|SE|SW)?"
+
+ADDRESS_RE = re.compile(
+    rf"\b\d+\s+{DIRECTIONS}\s*[A-Za-z0-9'\- ]+?\s+(?:{'|'.join(STREET_SUFFIXES)})\b",
+    re.IGNORECASE,
+)
+
+ADDRESS_RANGE_RE = re.compile(
+    rf"\b\d+\s*(?:and|&|to|-)\s*\d+\s+{DIRECTIONS}\s*[A-Za-z0-9'\- ]+?\s+(?:{'|'.join(STREET_SUFFIXES)})\b",
+    re.IGNORECASE,
+)
+
+PAREN_RE = re.compile(r"\(([^()]*)\)")
+
+PLACE_HINTS = (
+    "park", "square", "plaza", "hall", "room", "center", "centre",
+    "station", "memorial", "historic park", "community center", "library",
+    "village", "heights", "manor", "apartments", "school", "building",
+)
+
+TOPIC_HINTS = (
+    "fund", "lease", "waiver", "transfer", "signage", "signs", "moratorium",
+    "illegal dumping", "housing", "project", "equipment", "improvements",
+    "repairs", "services", "programs", "study", "assessment", "staffing",
+    "deployment", "installation", "closure", "seminar", "luncheon",
+    "ordinance", "reinstatement", "amendment", "agreement", "tefra",
+    "operation", "operations", "repair", "safety",
+)
+
+
+def to_json_list(value):
+    return json.dumps(value or [], ensure_ascii=False)
+
+
+def looks_like_address(text):
+    text = normalize(text)
+    return bool(ADDRESS_RANGE_RE.search(text) or ADDRESS_RE.search(text))
+
+
+def extract_address_candidates(title):
+    title = normalize(title)
+    candidates = []
+
+    for inside in PAREN_RE.findall(title):
+        inside = normalize(inside)
+        if looks_like_address(inside):
+            candidates.append(inside)
+
+    segments = [normalize(x) for x in title.split("/") if normalize(x)]
+    for seg in segments:
+        if looks_like_address(seg):
+            candidates.append(seg)
+
+    seen = set()
+    deduped = []
+    for c in candidates:
+        key = c.lower()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(c)
+
+    return deduped
+
+
+def looks_like_place(text):
+    t = normalize(text).lower()
+    return any(hint in t for hint in PLACE_HINTS)
+
+
+def looks_like_topic(text):
+    t = normalize(text).lower()
+    return any(hint in t for hint in TOPIC_HINTS)
+
+
+def parse_project_title(title):
+    title = normalize(title)
+    segments = [normalize(x) for x in title.split("/") if normalize(x)]
+    addresses = extract_address_candidates(title)
+
+    places = []
+    topics = []
+
+    for seg in segments:
+        if seg in addresses:
+            continue
+        if looks_like_place(seg):
+            places.append(seg)
+        else:
+            topics.append(seg)
+
+    return {
+        "project_title": title,
+        "address": addresses[0] if addresses else None,
+        "addresses": addresses,
+        "places": places,
+        "topics": topics,
+        "segments": segments,
+    }
+# --------------
 def normalize(value):
     if value is None:
         return ""
@@ -44,12 +153,10 @@ def make_key(value):
 
 
 def get_or_create_council_member(session, member_data):
-    name = normalize(
-        member_data.get("name")
-        or member_data.get("council_member_name")
-        or member_data.get("member_name")
-    )
-    district_raw =  member_data.get("cd") or 0 #member_data.get("district") or
+    first_name = normalize(member_data.get("first_name"))
+    last_name = normalize(member_data.get("last_name"))
+
+    district_raw = member_data.get("cd") or member_data.get("district") or 0
     try:
         district = int(district_raw)
     except Exception:
@@ -57,14 +164,17 @@ def get_or_create_council_member(session, member_data):
 
     member = session.execute(
         select(CouncilMember).where(
-            CouncilMember.name == name,
+            CouncilMember.first_name == first_name,
+            CouncilMember.last_name == last_name,
             # CouncilMember.district == district,
         )
     ).scalar_one_or_none()
 
     if member is None:
         member = CouncilMember(
-            name=name or "Unknown",
+            # name=normalize(member_data.get("name")),  # ❌ old
+            first_name=first_name or "Unknown",
+            last_name=last_name or "",
             district=district,
             impact_summary=normalize(member_data.get("impact_summary")),
             website=normalize(member_data.get("website")),
@@ -76,7 +186,6 @@ def get_or_create_council_member(session, member_data):
         session.flush()
 
     return member
-
 
 def get_or_create_graph_type(session, graph_data):
     label = normalize(graph_data.get("label"))
@@ -199,6 +308,37 @@ def save_project_record(project_id: str, data: dict):
 
         if data.get("end_date"):
             project.end_date = parse_date_safe(data.get("end_date"))
+
+       
+        # -------------------------
+        # Address info
+        # -------------------------
+        raw_title = normalize(data.get("title") or data.get("name") or project.name or project_id)
+        title_info = parse_project_title(raw_title)
+
+        existing_title = session.execute(
+            select(ProjectAddress).where(ProjectAddress.project_id == project.id)
+        ).scalar_one_or_none()
+
+        if existing_title is None:
+            session.add(
+                ProjectAddress(
+                    project_id=project.id,
+                    project_title=title_info["project_title"],
+                    address=title_info["address"],
+                    addresses=to_json_list(title_info["addresses"]),
+                    places=to_json_list(title_info["places"]),
+                    topics=to_json_list(title_info["topics"]),
+                    segments=to_json_list(title_info["segments"]),
+                )
+            )
+        else:
+            existing_title.project_title = title_info["project_title"]
+            existing_title.address = title_info["address"]
+            existing_title.addresses = to_json_list(title_info["addresses"])
+            existing_title.places = to_json_list(title_info["places"])
+            existing_title.topics = to_json_list(title_info["topics"])
+            existing_title.segments = to_json_list(title_info["segments"])
 
         # -------------------------
         # Vote info

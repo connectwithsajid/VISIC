@@ -16,7 +16,8 @@ class CouncilMember(Base):
     __tablename__ = "council_members"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String, nullable=False)
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
     district = Column(Integer, nullable=False)
     impact_summary = Column(String, nullable=True)
     website = Column(String, nullable=True)
@@ -56,6 +57,24 @@ class Project(Base):
     project_movers = relationship("ProjectMover", back_populates="project", cascade="all, delete-orphan")
     votes = relationship("Vote", back_populates="project", cascade="all, delete-orphan")
     project_graphs = relationship("ProjectGraph", back_populates="project", cascade="all, delete-orphan")
+
+    title_info = relationship("ProjectAddress", back_populates="project", uselist=False, cascade="all, delete-orphan")
+
+class ProjectAddress(Base):
+    __tablename__ = "project_address"
+
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    project_title = Column(String, nullable=False)
+
+    address = Column(String, nullable=True)
+
+    # JSON strings for portability
+    addresses = Column(String, nullable=True)
+    places = Column(String, nullable=True)
+    topics = Column(String, nullable=True)
+    segments = Column(String, nullable=True)
+
+    project = relationship("Project", back_populates="title_info")
 
 
 class ProjectMover(Base):
