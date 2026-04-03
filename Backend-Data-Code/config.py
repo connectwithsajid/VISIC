@@ -25,4 +25,3 @@ class Settings:
 
 settings = Settings()
 
-#print("DATABASE URL:", settings.DATABASE_URL) 
